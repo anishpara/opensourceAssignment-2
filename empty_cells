@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# empty_cells: count empty cells per column in a delimited file
+# Usage: ./empty_cells <filename> <delimiter>
+
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "Usage: $0 <filename> <delimiter>"
+  exit 1
+fi
+
+file="$1"
+sep="$2"
+
+awk -v FS="$sep" '
+# Remove any CR (\r), then:
+NR==1 {
+  gsub(/\r/, "")               # strip CR from header
+  num = NF                     # number of columns
+  for (i=1; i<=num; i++) {
+    header[i] = $i
+    count[i]  = 0
+  }
+  next
+}
+{
+  gsub(/\r/, "")               # strip CR from data lines
+  for (i=1; i<=num; i++) {
+    # If field i is missing or blank/whitespace only, count it
+    if (i>NF || $i ~ /^[ \t]*$/) {
+      count[i]++
+    }
+  }
+}
+END {
+  # Print in header order
+  for (i=1; i<=num; i++) {
+    print header[i] ": " count[i]
+  }
+}
+' "$file"
