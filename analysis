@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# analysis: compute most popular mechanics/domains and Pearson correlations from any delimited cleaned dataset
+# Usage: ./analysis <cleaned_file>
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <cleaned_file>" >&2
+  exit 1
+fi
+file="$1"
+
+# Read header line and strip CR
+header_line=$(head -n1 "$file" | tr -d '\r')
+
+# Detect delimiter: tab, semicolon, or comma
+if [[ "$header_line" == *$'\t'* ]]; then
+  delim=$'\t'
+elif [[ "$header_line" == *";"* ]]; then
+  delim=';'
+elif [[ "$header_line" == *","* ]]; then
+  delim=','
+else
+  delim=$'\t'
+fi
+
+# Function to get 1-based column index for a header name
+get_col() {
+  local name="$1"
+  local idx
+  idx=$(printf '%s' "$header_line" | awk -F"$delim" -v col="${name}" 'BEGIN{OFS=FS} {for(i=1;i<=NF;i++) if($i==col) print i}')
+  if [[ -z "$idx" ]]; then
+    echo "Error: column '$name' not found" >&2
+    exit 1
+  fi
+  echo "$idx"
+}
+
+# Determine column indices
+mech_col=$(get_col "Mechanics")
+dom_col=$(get_col "Domains")
+year_col=$(get_col "Year Published")
+rating_col=$(get_col "Rating Average")
+comp_col=$(get_col "Complexity Average")
+
+# Compute most popular mechanics
+echo -n "The most popular game mechanics is "
+awk -v FS="$delim" -v col=$mech_col 'NR>1 && $col!="" {
+    n=split($col, arr, ",");
+    for(i=1;i<=n;i++){
+      gsub(/^[ \t]+|[ \t]+$/,"", arr[i]);
+      print arr[i]
+    }
+}' "$file" | sort | uniq -c | sort -nr | awk 'NR==1 {count=$1; $1=""; sub(/^ +/,""); print $0" found in "count" games"}'
+
+# Compute most popular domains
+echo -n "The most game domain is "
+awk -v FS="$delim" -v col=$dom_col 'NR>1 && $col!="" {
+    n=split($col, arr, ",");
+    for(i=1;i<=n;i++){
+      gsub(/^[ \t]+|[ \t]+$/,"", arr[i]);
+      print arr[i]
+    }
+}' "$file" | sort | uniq -c | sort -nr | awk 'NR==1 {count=$1; $1=""; sub(/^ +/,""); print $0" found in "count" games"}'
+
+# Pearson correlation function using awk
+pearson() {
+  local xcol=$1 ycol=$2
+  awk -v FS="$delim" -v X=$xcol -v Y=$ycol '
+    NR>1 && $X!="" && $Y!="" {
+      x=$X+0; y=$Y+0;
+      n++; sx+=x; sy+=y; sxx+=x*x; syy+=y*y; sxy+=x*y;
+    }
+    END {
+      if(n>0) r=(n*sxy - sx*sy)/sqrt((n*sxx - sx*sx)*(n*syy - sy*sy));
+      printf "%.3f", r;
+    }' "$file"
+}
+
+# Compute correlations
+year_rating_corr=$(pearson $year_col $rating_col)
+comp_rating_corr=$(pearson $comp_col $rating_col)
+
+echo "The correlation between the year of publication and the average rating is $year_rating_corr"
+echo "The correlation between the complexity of a game and its average rating is $comp_rating_corr"
